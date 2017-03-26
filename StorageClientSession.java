@@ -63,6 +63,7 @@ public class StorageClientSession {
 		boolean success = dib.readBoolean();
 		if(success){
 			authenticated = true;
+			authenticated = true;
 		}else{
 			throw new AccessDeniedException();
 		}

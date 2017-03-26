@@ -56,7 +56,6 @@ public class LocalTest {
 	public static void testAuthentication(StorageClientSession session) 
 	throws IOException {
 		// leaves us logged in as a user
-
 		String name[] = {"Alice", "Bob", "Charlie"};
 		String pwd[] = {"apassword", "bob's password", "as0c9s83ks#1lasdp"};
 
@@ -74,6 +73,20 @@ public class LocalTest {
 		}catch(AccessDeniedException x){
 			x.printStackTrace();
 		}
+
+		// create an account for Bob
+		try {
+			session.createAccount(name[1], pwd[1]);
+		}catch(AccessDeniedException x){
+			x.printStackTrace();
+		}
+		// create an account for Charlie
+		try {
+			session.createAccount(name[2], pwd[2]);
+		}catch(AccessDeniedException x){
+			x.printStackTrace();
+		}
+
 		// should be able to log in as Alice now
 		try {
 			session.authenticate(name[0], pwd[0]);

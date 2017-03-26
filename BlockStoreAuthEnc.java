@@ -18,7 +18,7 @@ public class BlockStoreAuthEnc implements BlockStore {
     public BlockStoreAuthEnc(BlockStore underStore, PRGen thePrg) 
     throws DataIntegrityException {
         dev = underStore;
-        prg = thePrg; 
+        prg = thePrg;
     }
 
     public void format() throws DataIntegrityException { 
@@ -47,6 +47,20 @@ public class BlockStoreAuthEnc implements BlockStore {
 
     public void readBlock(int blockNum, byte[] buf, int bufOffset, 
         int blockOffset, int nbytes) throws DataIntegrityException {
+
+        // Questions for InfoSec
+        // do we need to treat un/pws differently than other encrypted data?
+        // encrypting block data
+        // different key for each block? for each write too?
+        // nonce could be function of write count and block #?
+        // reserve 4 bytes per block for counter (write count) (a la ParityBlockStore.java)?
+        // re-encrypt entire block on each access?
+        // use AuthDecryptor (which confirms integrity) and AuthEncryptor 
+
+        // possible solution: ?
+        // blockKey = (new PRF(keyForKeys)).eval(blockNum);
+        // instanceNonce = (new PRF(keyForNonces)).eval(instanceNum);
+        // AuthDecryptor(blockKey, instanceNonce, message);
 
         dev.readBlock(blockNum, buf, bufOffset, blockOffset, nbytes);
     }
