@@ -4,6 +4,7 @@ import java.io.DataOutputStream;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Vector;
+import java.util.Random;
 
 import java.io.IOException;
 
@@ -11,7 +12,11 @@ import java.io.IOException;
 public class ServerAuth {
   private ArrayStore            as;
   private BlockStoreMultiplexor multiplexor;
-  private int                   userInfoSize;
+  private Random                rand;
+  private byte[]                hashKey;
+  private final int             USER_INFO_SIZE_BYTES = 80;
+  private final int             HASH_SIZE_BYTES = 32;
+  private final int             SALT_SIZE_BYTES = 16;
   // CREATE, MODIFY, OR DELETE FIELDS AS NEEDED
 
   public ServerAuth(BlockStore myBlockStore, BlockStoreMultiplexor bsm) {
@@ -20,27 +25,33 @@ public class ServerAuth {
     // is available for use in keeping track of authentication info
     //
     // YOU SHOULD MODIFY THIS CONSTRUCTOR AS NEEDED
-    userInfoSize = 0;
+
     as = new ArrayStore(myBlockStore);
     multiplexor = bsm;
+    rand = new Random();
+    hashKey = new byte[HASH_SIZE_BYTES];
+    rand.nextBytes(hashKey);
   }
 
-  private String[][] getUserData()
-  throws DataIntegrityException {
-    byte[] buf = new byte[this.userInfoSize];
-    as.read(buf, 0, 0, userInfoSize);
-    String rawUserInfo = new String(buf);
-    if (rawUserInfo.length() == 0) return new String[0][0];
+  private byte[][][] getUserData() throws DataIntegrityException {
 
-    String[] userInfo = rawUserInfo.split(",");
-    String[][] parsedUserInfo = new String[userInfo.length][3];
-    for (int i = 0; i < userInfo.length; i++) {
-      String[] parsed = userInfo[i].split(":");
-      parsedUserInfo[i][0] = parsed[0];
-      parsedUserInfo[i][1] = parsed[1];
-      parsedUserInfo[i][2] = parsed[2];
+    int numUsers = multiplexor.numSubStores()-1;
+    byte[] buf = new byte[USER_INFO_SIZE_BYTES*numUsers];
+    // as.read(buf, 0, 0, USER_INFO_SIZE_BYTES*numUsers);
+
+    // hash(un):hash(salt, pw):salt
+    // 32, 32, 16
+    byte[][][] userInfo = new byte[numUsers][3][];
+    for (int i = 0; i < numUsers; i++) {
+      int offset = i*USER_INFO_SIZE_BYTES;
+      userInfo[i][0] = new byte[HASH_SIZE_BYTES];
+      userInfo[i][1] = new byte[HASH_SIZE_BYTES];
+      userInfo[i][2] = new byte[SALT_SIZE_BYTES];
+      as.read(userInfo[i][0], 0, offset, HASH_SIZE_BYTES);
+      as.read(userInfo[i][1], 0, offset+HASH_SIZE_BYTES, HASH_SIZE_BYTES);
+      as.read(userInfo[i][2], 0, offset+(HASH_SIZE_BYTES*2), SALT_SIZE_BYTES);
     }
-    return parsedUserInfo;
+    return userInfo;
   }
 
   public BlockStore createUser(String username, String password) 
@@ -56,22 +67,38 @@ public class ServerAuth {
     //
     // YOU SHOULD MODIFY THIS METHOD TO FIX THIS PROBLEM.
 
-    String[][] parsedUserInfo = this.getUserData();
+    // hash(un):hash(salt, pw):salt
+    // HASH_SIZE_BYTES, HASH_SIZE_BYTES, 16
+
+    byte[] salt = new byte[SALT_SIZE_BYTES];
+    rand.nextBytes(salt);
+
+    PRF hasher = new PRF(hashKey);
+    byte[] usernameHash = hasher.eval(username.getBytes());
+    hasher.eval(new byte[0]);
+    hasher.update(salt);
+    byte[] hashedVal = hasher.eval(password.getBytes());
+
+    // int storeNum = multiplexor.numSubStores();
+    // byte[] storeNum = ByteBuffer.allocate(4).putInt(storeNum).array();
+    byte[] newUserInfo = new byte[USER_INFO_SIZE_BYTES];
+    System.arraycopy(usernameHash, 0, newUserInfo, 0, usernameHash.length);
+    System.arraycopy(hashedVal, 0, newUserInfo, HASH_SIZE_BYTES, hashedVal.length);
+    System.arraycopy(salt, 0, newUserInfo, HASH_SIZE_BYTES*2, salt.length);
+
+    byte[][][] parsedUserInfo = this.getUserData();
 
     // check for existing
     for (int i = 0; i < parsedUserInfo.length; i++) {
-      if (parsedUserInfo[i][0].equals(username)) {
+      if (Arrays.equals(parsedUserInfo[i][0],usernameHash)) {
         return null;
       }
     }
 
-    byte[] updatedUserInfo = (username + ':' + password + ':' + multiplexor.numSubStores() + ',').getBytes();
+    int numUsers = multiplexor.numSubStores()-1;
+    as.write(newUserInfo, 0, numUsers*USER_INFO_SIZE_BYTES, newUserInfo.length);
 
-    as.write(updatedUserInfo, 0, userInfoSize, updatedUserInfo.length);
-
-    userInfoSize += updatedUserInfo.length;
     BlockStore newStore = multiplexor.newSubStore();
-    
     return newStore;  
   }
 
@@ -85,16 +112,22 @@ public class ServerAuth {
     // depend on <username> or <password>.  And if it returns a BlockStore,
     // it isn't necessarily the one associated with the given username.
     
-    String[][] parsedUserInfo = this.getUserData();
+    byte[][][] userInfo = this.getUserData();
+    PRF hasher = new PRF(hashKey);
+    byte[] usernameHash = hasher.eval(username.getBytes());
 
     // check for existing
-    for (int i = 0; i < parsedUserInfo.length; i++) {
-      if (parsedUserInfo[i][0].equals(username)) {
-        if (!parsedUserInfo[i][1].equals(password)) {
+    for (int i = 0; i < userInfo.length; i++) {
+      if (Arrays.equals(userInfo[i][0], usernameHash)) {
+        byte[] salt = userInfo[i][2];
+        hasher.eval(new byte[0]);
+        hasher.update(salt);
+        byte[] hashedPW = hasher.eval(password.getBytes());   
+        if (!Arrays.equals(userInfo[i][1], hashedPW)) {
           System.out.println("wrong pw!");
           return null;
         } 
-        int multiInd = Integer.parseInt(parsedUserInfo[i][2]);
+        int multiInd = i+1;
         System.out.println("multi_ind: " + multiInd);
         return multiplexor.getSubStore(multiInd);
       }
