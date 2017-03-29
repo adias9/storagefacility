@@ -1,11 +1,8 @@
-
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-
 import java.io.FileNotFoundException;
 import java.io.IOException;
-
 
 public class BlockDevice implements BlockStore {
 	private static final int BlockSize = 4096;
