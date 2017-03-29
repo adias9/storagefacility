@@ -22,6 +22,7 @@ public class TestBlockStore {
 			byte[] checkBlock = makeBlock(bs, bn);
 			byte[] rdBlock = new byte[bs.blockSize()];
 			bs.readBlock(bn, rdBlock, 0, 0, bs.blockSize());
+			System.out.println(bn);
 			for(int i=0; i<bs.blockSize(); ++i){
 				if(rdBlock[i]!=checkBlock[i]) {
 					return false;

@@ -7,10 +7,8 @@
 // to fix that.
 
 import java.util.Arrays;
-
 import java.io.FileNotFoundException;
 import java.nio.ByteBuffer;
-
 
 public class BlockStoreAuthEnc implements BlockStore {
     private BlockStore    dev;
@@ -25,6 +23,10 @@ public class BlockStoreAuthEnc implements BlockStore {
     private final int NONCE_BASE_OFFSET_BYTES = 32;
     private final int ROOT_HASH_OFFSET_BYTES = 64;
     private final int TREE_HASH_KEY_OFFSET_BYTES = 96;
+    private final byte[] zeroHash;
+    private final byte[] zeroArr;
+    private final byte[] emptyBlockData;
+
 
     public BlockStoreAuthEnc(BlockStore underStore, PRGen thePrg) 
     throws DataIntegrityException {
@@ -39,29 +41,28 @@ public class BlockStoreAuthEnc implements BlockStore {
         thePrg.nextBytes(treeHashKey);
 
         // compute hash of empty children
+
         PRF hasher = new PRF(treeHashKey);
+        emptyBlockData = new byte[this.blockSize()];
+        byte[] emptyData = new byte[this.blockSize() + COUNTER_SIZE_BYTES + (2*HASH_SIZE_BYTES)];
 
-        byte[] emptyData = new byte[this.blockSize()];
-        // should we be hashing encrypted or unencrypted data?
-        hasher.update(emptyData);
+        this.zeroHash = hasher.eval(emptyData);
 
-        byte[] writeInstance = new byte[COUNTER_SIZE_BYTES];
-        hasher.update(writeInstance);
-        // get children hashes
-        byte[] leftChildHash = new byte[HASH_SIZE_BYTES];
-        byte[] rightChildHash = new byte[HASH_SIZE_BYTES];
-        hasher.update(leftChildHash);
-        byte[] hash = hasher.eval(rightChildHash);
+        byte[] hash = new byte[HASH_SIZE_BYTES];
 
+        zeroArr = new byte[HASH_SIZE_BYTES];
 
         dev.writeSuperBlock(keyOfKeys, 0, 0, HASH_SIZE_BYTES);
         dev.writeSuperBlock(keyOfNonces, 0, NONCE_BASE_OFFSET_BYTES, HASH_SIZE_BYTES);
-        dev.writeSuperBlock(keyOfKeys, 0, ROOT_HASH_OFFSET_BYTES, HASH_SIZE_BYTES);
+        dev.writeSuperBlock(hash, 0, ROOT_HASH_OFFSET_BYTES, HASH_SIZE_BYTES);
         dev.writeSuperBlock(treeHashKey, 0, TREE_HASH_KEY_OFFSET_BYTES, HASH_SIZE_BYTES);
+        byte[] treeHashKey3 = new byte[HASH_SIZE_BYTES];
+        dev.readSuperBlock(treeHashKey3, 0, TREE_HASH_KEY_OFFSET_BYTES, HASH_SIZE_BYTES);
     }
 
     public void format() throws DataIntegrityException { 
-        dev.format();
+        // NEED TO FIX
+        // dev.format();
     }
 
     public int blockSize() {
@@ -97,6 +98,7 @@ public class BlockStoreAuthEnc implements BlockStore {
         // re-encrypt entire block on each access?
         // use AuthDecryptor (which confirms integrity) and AuthEncryptor 
 
+        System.out.println("reading: " + blockNum);
         byte[] writeInstance = new byte[COUNTER_SIZE_BYTES];
         dev.readBlock(blockNum, writeInstance, 0, COUNTER_OFFSET_BYTES, COUNTER_SIZE_BYTES);
 
@@ -120,31 +122,53 @@ public class BlockStoreAuthEnc implements BlockStore {
         byte[] leftChildHash = new byte[HASH_SIZE_BYTES];
         byte[] rightChildHash = new byte[HASH_SIZE_BYTES];
         // will these indices always exist? THIS IS WRONG
-        dev.readBlock(blockNum*2, leftChildHash, 0, 0, HASH_SIZE_BYTES);
-        dev.readBlock(blockNum*2+1, rightChildHash, 0, 0, HASH_SIZE_BYTES);
+        dev.readBlock(blockNum*2+1, leftChildHash, 0, 0, HASH_SIZE_BYTES);
+        dev.readBlock(blockNum*2+2, rightChildHash, 0, 0, HASH_SIZE_BYTES);
         hasher.update(leftChildHash);
         byte[] hash = hasher.eval(rightChildHash);
 
-        while (blockNum != 0) {
-            blockNum /= 2;
+
+        if (Arrays.equals(hash, zeroHash)) {
+            System.arraycopy(zeroArr, 0, hash, 0, hash.length);
+        }
+
+        dev.writeBlock(blockNum, hash, 0, 0, HASH_SIZE_BYTES);
+
+        int tempBlockNum = blockNum;
+        while (tempBlockNum != 0) {
+            tempBlockNum = (tempBlockNum-1) / 2;
             // should we be hashing encrypted or unencrypted data?
-            dev.readBlock(blockNum, encryptedData, 0, BLOCK_STORAGE_OFFSET_BYTES, this.blockSize());
-            dev.readBlock(blockNum, writeInstance, 0, COUNTER_OFFSET_BYTES, COUNTER_SIZE_BYTES);
+            dev.readBlock(tempBlockNum, encryptedData, 0, BLOCK_STORAGE_OFFSET_BYTES, this.blockSize());
+            dev.readBlock(tempBlockNum, writeInstance, 0, COUNTER_OFFSET_BYTES, COUNTER_SIZE_BYTES);
+            
+            hasher = new PRF(treeHashKey);
             hasher.update(encryptedData);
             hasher.update(writeInstance);
             // get children hashes
             leftChildHash = new byte[HASH_SIZE_BYTES];
             rightChildHash = new byte[HASH_SIZE_BYTES];
             // will these indices always exist? THIS IS WRONG
-            dev.readBlock(blockNum*2, leftChildHash, 0, 0, HASH_SIZE_BYTES);
-            dev.readBlock(blockNum*2+1, rightChildHash, 0, 0, HASH_SIZE_BYTES);
+            dev.readBlock(tempBlockNum*2+1, leftChildHash, 0, 0, HASH_SIZE_BYTES);
+            dev.readBlock(tempBlockNum*2+2, rightChildHash, 0, 0, HASH_SIZE_BYTES);
             hasher.update(leftChildHash);
             hash = hasher.eval(rightChildHash);
-        }
 
+            if (Arrays.equals(hash, zeroHash)) {
+                System.arraycopy(zeroArr, 0, hash, 0, hash.length);
+            }
+
+            // System.out.println();
+            // System.out.println("hash for block " + tempBlockNum + ": " + javax.xml.bind.DatatypeConverter.printHexBinary(hash));
+            // System.out.println("writeInstance: " + javax.xml.bind.DatatypeConverter.printHexBinary(writeInstance));
+            // System.out.println("leftChildHash: " + javax.xml.bind.DatatypeConverter.printHexBinary(leftChildHash));
+            // System.out.println("rightChildHash: " + javax.xml.bind.DatatypeConverter.printHexBinary(rightChildHash));
+
+            dev.writeBlock(tempBlockNum, hash, 0, 0, HASH_SIZE_BYTES);
+        }
         byte[] superHash = new byte[HASH_SIZE_BYTES];
         dev.readSuperBlock(superHash, 0, ROOT_HASH_OFFSET_BYTES, HASH_SIZE_BYTES);
-
+        // System.out.println("decoding superHash: " + javax.xml.bind.DatatypeConverter.printHexBinary(superHash));
+        // System.out.println("decoding hash: " + javax.xml.bind.DatatypeConverter.printHexBinary(hash));
 
         if (!Arrays.equals(superHash, hash)) {
             throw new DataIntegrityException();
@@ -162,11 +186,31 @@ public class BlockStoreAuthEnc implements BlockStore {
         byte[] keyOfNonces = new byte[HASH_SIZE_BYTES];
         dev.readSuperBlock(keyOfNonces, 0, NONCE_BASE_OFFSET_BYTES, HASH_SIZE_BYTES);
         byte[] nonce = (new PRF(keyOfNonces)).eval(writeInstance);
+        // System.out.println("writeInstance: " + javax.xml.bind.DatatypeConverter.printHexBinary(writeInstance));
+        if (blockNum == 27) {
+            System.out.println("read decoding key: " + javax.xml.bind.DatatypeConverter.printHexBinary(decryptorKey));
+            System.out.println("read decoding nonce: " + javax.xml.bind.DatatypeConverter.printHexBinary(nonce));
+            System.out.println("read encoded data: " + javax.xml.bind.DatatypeConverter.printHexBinary(encryptedData));
+            System.out.println("read encoded data length: " + encryptedData.length);
+        }
 
-        // decrypt with nonce
-        AuthDecryptor decryptor = new AuthDecryptor(decryptorKey);
-        byte[] decryptedData = decryptor.decrypt(encryptedData, nonce);
+        // if block is empty, no need to decrypt
+        if (Arrays.equals(emptyBlockData, encryptedData)) {
+            System.arraycopy(encryptedData, blockOffset, buf, bufOffset, nbytes);
+            return;
+        }
 
+        // not empty, so decrypt with nonce
+        // AuthDecryptor decryptor = new AuthDecryptor(decryptorKey);
+        // byte[] decryptedData = decryptor.decrypt(encryptedData, nonce);
+        StreamCipher cipher = new StreamCipher(decryptorKey, nonce);
+        byte[] decryptedData = new byte[encryptedData.length];
+        cipher.cryptBytes(encryptedData, 0, decryptedData, 0, encryptedData.length);
+
+        // System.out.println("length of decryptedData: " + decryptedData.length);
+        // System.out.println("blockOffset: " + blockOffset);
+        // System.out.println("bufOffset: " + bufOffset);
+        // System.out.println("nbytes: " + nbytes);
         System.arraycopy(decryptedData, blockOffset, buf, bufOffset, nbytes);
     }
 
@@ -176,6 +220,7 @@ public class BlockStoreAuthEnc implements BlockStore {
         // maybe need to check current path/integrity first?
 
         // write data
+        System.out.println("write: " + blockNum);
 
         // update hash
         // get key
@@ -190,7 +235,16 @@ public class BlockStoreAuthEnc implements BlockStore {
         dev.readSuperBlock(keyOfNonces, 0, NONCE_BASE_OFFSET_BYTES, HASH_SIZE_BYTES);
         byte[] writeInstance = new byte[COUNTER_SIZE_BYTES];
         dev.readBlock(blockNum, writeInstance, 0, COUNTER_OFFSET_BYTES, COUNTER_SIZE_BYTES);
-        byte[] nonce = (new PRF(keyOfNonces)).eval(writeInstance);
+
+        // increment write instance
+        long writeInstanceLong = LongUtils.bytesToLong(writeInstance, 0);
+        writeInstanceLong++;
+        byte[] incrementedWriteInstance = new byte[COUNTER_SIZE_BYTES];
+        LongUtils.longToBytes(writeInstanceLong, incrementedWriteInstance, 0);
+
+        // get nonce from incremented write instance
+        byte[] nonce = (new PRF(keyOfNonces)).eval(incrementedWriteInstance);
+        // System.out.println("incrementedWriteInstance: " + javax.xml.bind.DatatypeConverter.printHexBinary(incrementedWriteInstance));
 
         // needs to handle only partial writes!
         // decrypt current block first?
@@ -200,17 +254,24 @@ public class BlockStoreAuthEnc implements BlockStore {
         System.arraycopy(buf, bufOffset, currBlockBytes, blockOffset, nbytes);
 
         // encrypt with new nonce and data changes
-        AuthEncryptor encryptor = new AuthEncryptor(encryptorKey);
-        byte[] encryptedData = encryptor.encrypt(currBlockBytes, nonce, false);
+        // AuthEncryptor encryptor = new AuthEncryptor(encryptorKey);
+        // byte[] encryptedData = encryptor.encrypt(currBlockBytes, nonce, false);
+        StreamCipher cipher = new StreamCipher(encryptorKey, nonce);
+        byte[] encryptedData = new byte[currBlockBytes.length];
+        cipher.cryptBytes(currBlockBytes, 0, encryptedData, 0, currBlockBytes.length);
+
+        if (blockNum == 27) {
+            System.out.println("blockNum: "+blockNum);
+            System.out.println("encoding key: " + javax.xml.bind.DatatypeConverter.printHexBinary(encryptorKey));
+            System.out.println("encoding nonce: " + javax.xml.bind.DatatypeConverter.printHexBinary(nonce));
+            System.out.println("encoded data: " + javax.xml.bind.DatatypeConverter.printHexBinary(encryptedData));
+            System.out.println("encoded data length: " + encryptedData.length);
+        }
+        // System.out.println("original size: " + currBlockBytes.length);
+        // System.out.println("encrypted size: " + encryptedData.length);
 
         // write new block data
         dev.writeBlock(blockNum, encryptedData, 0, BLOCK_STORAGE_OFFSET_BYTES, this.blockSize());
-
-        // increment write instance
-        long writeInstanceLong = LongUtils.bytesToLong(writeInstance, 0);
-        writeInstanceLong++;
-        byte[] incrementedWriteInstance = new byte[COUNTER_SIZE_BYTES];
-        LongUtils.longToBytes(writeInstanceLong, incrementedWriteInstance, 0);
         dev.writeBlock(blockNum, incrementedWriteInstance, 0, COUNTER_OFFSET_BYTES, COUNTER_SIZE_BYTES);
 
         // recompute hash and update tree!!
@@ -224,34 +285,42 @@ public class BlockStoreAuthEnc implements BlockStore {
         // get children hashes
         byte[] leftChildHash = new byte[HASH_SIZE_BYTES];
         byte[] rightChildHash = new byte[HASH_SIZE_BYTES];
-        // will these indices always exist? THIS IS WRONG
-        dev.readBlock(blockNum*2, leftChildHash, 0, 0, HASH_SIZE_BYTES);
-        dev.readBlock(blockNum*2+1, rightChildHash, 0, 0, HASH_SIZE_BYTES);
+        dev.readBlock(blockNum*2+1, leftChildHash, 0, 0, HASH_SIZE_BYTES);
+        dev.readBlock(blockNum*2+2, rightChildHash, 0, 0, HASH_SIZE_BYTES);
         hasher.update(leftChildHash);
         byte[] hash = hasher.eval(rightChildHash);
 
         // write hash
         dev.writeBlock(blockNum, hash, 0, 0, HASH_SIZE_BYTES);
 
+        int tempBlockNum = blockNum;
         // update the tree
-        while (blockNum != 0) {
-            blockNum /= 2;
+        while (tempBlockNum != 0) {
+            tempBlockNum = (tempBlockNum-1) / 2;
+            // System.out.println();
+            // System.out.println("updating node " + tempBlockNum);
             // should we be hashing encrypted or unencrypted data?
-            dev.readBlock(blockNum, encryptedData, 0, BLOCK_STORAGE_OFFSET_BYTES, this.blockSize());
-            dev.readBlock(blockNum, incrementedWriteInstance, 0, COUNTER_OFFSET_BYTES, COUNTER_SIZE_BYTES);
+            dev.readBlock(tempBlockNum, encryptedData, 0, BLOCK_STORAGE_OFFSET_BYTES, this.blockSize());
+            dev.readBlock(tempBlockNum, incrementedWriteInstance, 0, COUNTER_OFFSET_BYTES, COUNTER_SIZE_BYTES);
+            hasher = new PRF(treeHashKey);
             hasher.update(encryptedData);
             hasher.update(incrementedWriteInstance);
             // get children hashes
             leftChildHash = new byte[HASH_SIZE_BYTES];
             rightChildHash = new byte[HASH_SIZE_BYTES];
             // will these indices always exist? THIS IS WRONG
-            dev.readBlock(blockNum*2, leftChildHash, 0, 0, HASH_SIZE_BYTES);
-            dev.readBlock(blockNum*2+1, rightChildHash, 0, 0, HASH_SIZE_BYTES);
+            dev.readBlock(tempBlockNum*2+1, leftChildHash, 0, 0, HASH_SIZE_BYTES);
+            dev.readBlock(tempBlockNum*2+2, rightChildHash, 0, 0, HASH_SIZE_BYTES);
             hasher.update(leftChildHash);
             hash = hasher.eval(rightChildHash);
 
+            // System.out.println("new hash for block " + tempBlockNum + ": " + javax.xml.bind.DatatypeConverter.printHexBinary(hash));
+            // System.out.println("writeInstance: " + javax.xml.bind.DatatypeConverter.printHexBinary(writeInstance));
+            // System.out.println("leftChildHash: " + javax.xml.bind.DatatypeConverter.printHexBinary(leftChildHash));
+            // System.out.println("rightChildHash: " + javax.xml.bind.DatatypeConverter.printHexBinary(rightChildHash));
+
             // write hash
-            dev.writeBlock(blockNum, hash, 0, 0, HASH_SIZE_BYTES);
+            dev.writeBlock(tempBlockNum, hash, 0, 0, HASH_SIZE_BYTES);
         }
 
         dev.writeSuperBlock(hash, 0, ROOT_HASH_OFFSET_BYTES, HASH_SIZE_BYTES);
