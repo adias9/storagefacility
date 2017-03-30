@@ -74,18 +74,18 @@ public class LocalTest {
 			x.printStackTrace();
 		}
 
-		// create an account for Bob
-		try {
-			session.createAccount(name[1], pwd[1]);
-		}catch(AccessDeniedException x){
-			x.printStackTrace();
-		}
-		// create an account for Charlie
-		try {
-			session.createAccount(name[2], pwd[2]);
-		}catch(AccessDeniedException x){
-			x.printStackTrace();
-		}
+		// // create an account for Bob
+		// try {
+		// 	session.createAccount(name[1], pwd[1]);
+		// }catch(AccessDeniedException x){
+		// 	x.printStackTrace();
+		// }
+		// // create an account for Charlie
+		// try {
+		// 	session.createAccount(name[2], pwd[2]);
+		// }catch(AccessDeniedException x){
+		// 	x.printStackTrace();
+		// }
 
 		// should be able to log in as Alice now
 		try {

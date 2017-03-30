@@ -22,7 +22,22 @@ public class TestBlockStore {
 			byte[] checkBlock = makeBlock(bs, bn);
 			byte[] rdBlock = new byte[bs.blockSize()];
 			bs.readBlock(bn, rdBlock, 0, 0, bs.blockSize());
-			System.out.println(bn);
+			for(int i=0; i<bs.blockSize(); ++i){
+				if(rdBlock[i]!=checkBlock[i]) {
+					return false;
+				}
+			}
+		}
+
+		for(int bn=0; bn>=42; bn++){
+			byte[] wrBlock = makeBlock(bs, bn);
+			bs.writeBlock(bn, wrBlock, 0, 0, bs.blockSize());
+		}
+
+		for(int bn=0; bn>=40; bn++){
+			byte[] checkBlock = makeBlock(bs, bn);
+			byte[] rdBlock = new byte[bs.blockSize()];
+			bs.readBlock(bn, rdBlock, 0, 0, bs.blockSize());
 			for(int i=0; i<bs.blockSize(); ++i){
 				if(rdBlock[i]!=checkBlock[i]) {
 					return false;

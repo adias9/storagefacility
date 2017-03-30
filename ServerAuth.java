@@ -37,10 +37,9 @@ public class ServerAuth {
 
     int numUsers = multiplexor.numSubStores()-1;
     byte[] buf = new byte[USER_INFO_SIZE_BYTES*numUsers];
-    // as.read(buf, 0, 0, USER_INFO_SIZE_BYTES*numUsers);
 
     // hash(un):hash(salt, pw):salt
-    // 32, 32, 16
+    System.out.println("num of users: "+ numUsers);
     byte[][][] userInfo = new byte[numUsers][3][];
     for (int i = 0; i < numUsers; i++) {
       int offset = i*USER_INFO_SIZE_BYTES;
@@ -64,8 +63,6 @@ public class ServerAuth {
     // BlockStore in all cases, without checking if the name is already taken,
     // and without storing any information that might be needed for 
     // authentication later.
-    //
-    // YOU SHOULD MODIFY THIS METHOD TO FIX THIS PROBLEM.
 
     // hash(un):hash(salt, pw):salt
     // HASH_SIZE_BYTES, HASH_SIZE_BYTES, 16
@@ -118,6 +115,8 @@ public class ServerAuth {
 
     // check for existing
     for (int i = 0; i < userInfo.length; i++) {
+      System.out.println("userInfo: " + javax.xml.bind.DatatypeConverter.printHexBinary(userInfo[i][0]));
+      System.out.println("usernameHash: " + javax.xml.bind.DatatypeConverter.printHexBinary(usernameHash));
       if (Arrays.equals(userInfo[i][0], usernameHash)) {
         byte[] salt = userInfo[i][2];
         hasher.eval(new byte[0]);
@@ -132,7 +131,7 @@ public class ServerAuth {
         return multiplexor.getSubStore(multiInd);
       }
     }
-
+    System.out.println("not found");
     return null;
   }
 }

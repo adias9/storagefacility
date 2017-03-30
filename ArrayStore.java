@@ -49,7 +49,7 @@ public class ArrayStore {
 
 	public void read(byte[] buf, int bufOffset, int storageOffset, int nbytes) 
 		throws DataIntegrityException {
-			
+
 		while(nbytes > 0){
 			int blockNum = storageOffset / blockSize;
 			int blockOffset = storageOffset % blockSize;
